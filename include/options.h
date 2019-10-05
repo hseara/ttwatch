@@ -28,6 +28,7 @@ typedef struct
     int get_time;
     int set_time;
     int get_activities;
+    int get_summaries;
     int get_name;
     int set_name;
     char *watch_name;
@@ -54,6 +55,8 @@ typedef struct
     char *post_processor;
     int factory_reset;
     int initial_setup;
+    int force;
+    int eph_7_days;
 } OPTIONS;
 
 /*****************************************************************************/

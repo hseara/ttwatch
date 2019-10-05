@@ -18,17 +18,6 @@
 
 /*****************************************************************************/
 
-const OFFLINE_FORMAT OFFLINE_FORMATS[OFFLINE_FORMAT_COUNT] = {
-    { OFFLINE_FORMAT_CSV, "csv", 1, 1, 1, 1, export_csv },
-    { OFFLINE_FORMAT_FIT, "fit", 1, 0, 0, 0, 0          },
-    { OFFLINE_FORMAT_GPX, "gpx", 1, 0, 0, 0, export_gpx },
-    { OFFLINE_FORMAT_KML, "kml", 1, 0, 0, 0, export_kml },
-    { OFFLINE_FORMAT_PWX, "pwx", 1, 0, 0, 0, 0          },
-    { OFFLINE_FORMAT_TCX, "tcx", 1, 1, 0, 1, export_tcx },
-};
-
-/*****************************************************************************/
-
 typedef struct __attribute__((packed))
 {
     uint8_t tag;
@@ -38,7 +27,20 @@ typedef struct __attribute__((packed))
 typedef struct __attribute__((packed))
 {
     uint16_t file_version;
+} FILE_VERSION_HEADER;
+
+typedef struct __attribute__((packed))
+{
     uint8_t  firmware_version[3];
+} FIRMWARE_VERSION_HEADER_09;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t  firmware_version[6];
+} FIRMWARE_VERSION_HEADER_10;
+
+typedef struct __attribute__((packed))
+{
     uint16_t product_id;
     uint32_t start_time;    /* local time */
     uint8_t  software_version[16];
@@ -111,6 +113,13 @@ typedef struct __attribute__((packed))
     uint16_t total_calories;
     uint32_t total_cycles;
 } FILE_GYM_RECORD;
+
+typedef struct __attribute__((packed))
+{
+    uint32_t timestamp;
+    uint16_t points1;
+    uint16_t points2;
+} FILE_FITNESS_POINT_RECORD;
 
 typedef struct __attribute__((packed))
 {
@@ -277,16 +286,17 @@ static void remove_array(RECORD_ARRAY *array, TTBIN_RECORD *record)
 }
 
 
-TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
+TTBIN_FILE *parse_ttbin_data(const uint8_t *data, uint32_t size)
 {
     const uint8_t *const end = data + size;
     TTBIN_FILE *file;
     unsigned length;
 
-    FILE_HEADER               *file_header = 0;
+    const FILE_VERSION_HEADER *file_version = 0;
+    const FILE_HEADER *file_header = 0;
     union
     {
-        uint8_t *data;
+        const uint8_t *data;
         struct
         {
             uint8_t tag;
@@ -299,6 +309,7 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
                 FILE_TREADMILL_RECORD           treadmill;
                 FILE_SWIM_RECORD                swim;
                 FILE_GYM_RECORD                 gym;
+                FILE_FITNESS_POINT_RECORD       fitness_point;
                 FILE_LAP_RECORD                 lap;
                 FILE_RACE_SETUP_RECORD          race_setup;
                 FILE_RACE_RESULT_RECORD         race_result;
@@ -313,7 +324,7 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
                 FILE_HEART_RATE_RECOVERY_RECORD heart_rate_recovery;
                 FILE_CYCLING_CADENCE_RECORD     cycling_cadence;
             };
-        } *record;
+        } const *record;
     } p;
 
     TTBIN_RECORD *record;
@@ -327,10 +338,33 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
 
     file = calloc(1, sizeof(TTBIN_FILE));
 
+    file_version = (FILE_VERSION_HEADER*)data;
+    file->file_version = file_version->file_version;
+    data += sizeof(FILE_VERSION_HEADER);
+
+    if (file->file_version <= 9)
+    {
+        const FIRMWARE_VERSION_HEADER_09 *firmware_version = 0;
+
+        firmware_version = (FIRMWARE_VERSION_HEADER_09*)data;
+        data += sizeof(FIRMWARE_VERSION_HEADER_09);
+        memcpy(file->firmware_version, firmware_version->firmware_version, sizeof(firmware_version->firmware_version));
+    }
+    else if (file->file_version == 10) {
+        const FIRMWARE_VERSION_HEADER_10 *firmware_version = 0;
+
+        firmware_version = (FIRMWARE_VERSION_HEADER_10*)data;
+        data += sizeof(FIRMWARE_VERSION_HEADER_10);
+        memcpy(file->firmware_version, firmware_version->firmware_version, sizeof(firmware_version->firmware_version));
+    }
+    else
+    {
+        return 0;
+    }
+
     file_header = (FILE_HEADER*)data;
     data += sizeof(FILE_HEADER) + (file_header->length_count - 1) * sizeof(RECORD_LENGTH);
-    file->file_version    = file_header->file_version;
-    memcpy(file->firmware_version, file_header->firmware_version, sizeof(file->firmware_version));
+
     file->product_id      = file_header->product_id;
     file->timestamp_local = file_header->start_time;
     file->timestamp_utc   = file_header->start_time - file_header->local_time_offset;
@@ -360,12 +394,10 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
             file->total_calories = p.record->summary.calories;
             break;
         case TAG_STATUS:
-            p.record->status.timestamp -= file->utc_offset;
-
             record = append_record(file, p.record->tag, length);
             record->status.status = p.record->status.status;
             record->status.activity = p.record->status.activity;
-            record->status.timestamp = p.record->status.timestamp;
+            record->status.timestamp = p.record->status.timestamp - file->utc_offset;
             append_array(&file->status_records, record);
             break;
         case TAG_GPS:
@@ -387,10 +419,8 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
             append_array(&file->gps_records, record);
             break;
         case TAG_HEART_RATE:
-            p.record->heart_rate.timestamp -= file->utc_offset;
-
             record = append_record(file, p.record->tag, length);
-            record->heart_rate.timestamp  = p.record->heart_rate.timestamp;
+            record->heart_rate.timestamp  = p.record->heart_rate.timestamp - file->utc_offset;
             record->heart_rate.heart_rate = p.record->heart_rate.heart_rate;
             append_array(&file->heart_rate_records, record);
             break;
@@ -410,20 +440,16 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
             append_array(&file->cycling_cadence_records, record);
             break;
         case TAG_TREADMILL:
-            p.record->treadmill.timestamp -= file->utc_offset;
-
             record = append_record(file, p.record->tag, length);
-            record->treadmill.timestamp = p.record->treadmill.timestamp;
+            record->treadmill.timestamp = p.record->treadmill.timestamp - file->utc_offset;
             record->treadmill.distance  = p.record->treadmill.distance;
             record->treadmill.calories  = p.record->treadmill.calories;
             record->treadmill.steps     = p.record->treadmill.steps;
             append_array(&file->treadmill_records, record);
             break;
         case TAG_SWIM:
-            p.record->swim.timestamp -= file->utc_offset;
-
             record = append_record(file, p.record->tag, length);
-            record->swim.timestamp      = p.record->swim.timestamp;
+            record->swim.timestamp      = p.record->swim.timestamp - file->utc_offset;
             record->swim.total_distance = p.record->swim.total_distance;
             record->swim.strokes        = p.record->swim.strokes;
             record->swim.completed_laps = p.record->swim.completed_laps;
@@ -518,7 +544,18 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
             record->gym.total_cycles    = p.record->gym.total_cycles;
             append_array(&file->gym_records, record);
             break;
+        case TAG_FITNESS_POINT:
+            record = append_record(file, p.record->tag, length);
+            record->fitness_point.timestamp = p.record->fitness_point.timestamp;
+            record->fitness_point.points1   = p.record->fitness_point.points1;
+            record->fitness_point.points2   = p.record->fitness_point.points2;
+            append_array(&file->fitness_point_records, record);
+            break;
         default:
+            if (length == 0xffff)
+            {
+                length = p.data[2] * 256 + p.data[1] + 3; // 3 to skip over tag plus length
+            }
             record = append_record(file, p.record->tag, length);
             memcpy(record->data, p.data + 1, length - 1);
             break;
@@ -533,6 +570,12 @@ TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size)
 void insert_length_record(FILE_HEADER *header, uint8_t tag, uint16_t length)
 {
     unsigned i = 0;
+
+    /* Tag 0x4b is a dynamic length tag, so handle with special case */
+    if (tag == TAG_UNKNOWN_4B_VAR_LEN) {
+        length = 0xffff;
+    }
+
     /* look for the position to put the new tag (numerical order) */
     while ((tag > header->lengths[i].tag) && (header->lengths[i].tag != 0))
         ++i;
@@ -551,24 +594,42 @@ int write_ttbin_file(const TTBIN_FILE *ttbin, FILE *file)
 {
     TTBIN_RECORD *record;
     uint8_t tag = TAG_FILE_HEADER;
+    uint16_t current_version;
     unsigned size;
+    size_t file_header_length; /* differs depending on file version */
     FILE_HEADER *header;
     FILE_SUMMARY_RECORD summary;
 
+    file_header_length = sizeof(FILE_HEADER) + sizeof(FILE_VERSION_HEADER) - sizeof(RECORD_LENGTH);
+
     /* create and write the file header */
+    fwrite(&tag, 1, 1, file);
+    /* first file version */
+    current_version = ttbin->file_version;
+    fwrite(&current_version, sizeof(uint16_t), 1, file);
+    /* firmware version */
+    if (current_version <= 9) {
+        FIRMWARE_VERSION_HEADER_09 firmware_header;
+        memcpy(&firmware_header.firmware_version, ttbin->firmware_version, sizeof(firmware_header.firmware_version));
+        fwrite(&firmware_header, sizeof(firmware_header), 1, file);
+        file_header_length += sizeof(FIRMWARE_VERSION_HEADER_09);
+    } else {
+        FIRMWARE_VERSION_HEADER_10 firmware_header;
+        memcpy(&firmware_header.firmware_version, ttbin->firmware_version, sizeof(firmware_header.firmware_version));
+        fwrite(&firmware_header, sizeof(firmware_header), 1, file);
+        file_header_length += sizeof(FIRMWARE_VERSION_HEADER_10);
+    }
+    /* the rest of the common header */
     size = sizeof(FILE_HEADER) + 29 * sizeof(RECORD_LENGTH);
     header = (FILE_HEADER*)calloc(1, size);
-    header->file_version = ttbin->file_version;
-    memcpy(header->firmware_version, ttbin->firmware_version, sizeof(header->firmware_version));
     header->product_id = ttbin->product_id;
     header->start_time = ttbin->timestamp_local;
     header->watch_time = ttbin->timestamp_local;
     header->local_time_offset = ttbin->utc_offset;
-    insert_length_record(header, TAG_FILE_HEADER, sizeof(FILE_HEADER) - sizeof(RECORD_LENGTH));
+    insert_length_record(header, TAG_FILE_HEADER, file_header_length);
     insert_length_record(header, TAG_SUMMARY, sizeof(FILE_SUMMARY_RECORD) + 1);
     for (record = ttbin->first; record; record = record->next)
         insert_length_record(header, record->tag, record->length);
-    fwrite(&tag, 1, 1, file);
     fwrite(header, 1, sizeof(FILE_HEADER) + (header->length_count - 1) * sizeof(RECORD_LENGTH), file);
 
     for (record = ttbin->first; record; record = record->next)
@@ -760,6 +821,16 @@ int write_ttbin_file(const TTBIN_FILE *ttbin, FILE *file)
                 record->gym.total_cycles
             };
             fwrite(&r, 1, sizeof(FILE_GYM_RECORD), file);
+            break;
+        }
+        case TAG_FITNESS_POINT: {
+            FILE_FITNESS_POINT_RECORD r = {
+                record->gym.timestamp,
+                record->fitness_point.points1,
+                record->fitness_point.points2,
+            };
+            fwrite(&r, 1, sizeof(FILE_FITNESS_POINT_RECORD), file);
+            break;
         }
         default: {
             fwrite(record->data, 1, record->length - 1, file);
@@ -840,6 +911,7 @@ void delete_record(TTBIN_FILE *ttbin, TTBIN_RECORD *record)
     case TAG_INTERVAL_FINISH: remove_array(&ttbin->interval_finish_records, record); break;
     case TAG_ALTITUDE_UPDATE: remove_array(&ttbin->altitude_records, record); break;
     case TAG_GYM: remove_array(&ttbin->gym_records, record); break;
+    case TAG_FITNESS_POINT: remove_array(&ttbin->fitness_point_records, record); break;
     case TAG_CYCLING_CADENCE: remove_array(&ttbin->cycling_cadence_records, record); break;
     }
 
@@ -864,13 +936,17 @@ const char *create_filename(TTBIN_FILE *ttbin, const char *ext)
 
     switch (ttbin->activity)
     {
-    case ACTIVITY_RUNNING:   type = "Running"; break;
-    case ACTIVITY_CYCLING:   type = "Cycling"; break;
-    case ACTIVITY_SWIMMING:  type = "Pool_swim"; break;
-    case ACTIVITY_TREADMILL: type = "Treadmill"; break;
-    case ACTIVITY_FREESTYLE: type = "Freestyle"; break;
-    case ACTIVITY_GYM:       type = "Gym"; break;
-    case ACTIVITY_INDOOR:    type = "Indoor"; break;
+    case ACTIVITY_RUNNING:      type = "Running"; break;
+    case ACTIVITY_CYCLING:      type = "Cycling"; break;
+    case ACTIVITY_SWIMMING:     type = "Pool_swim"; break;
+    case ACTIVITY_TREADMILL:    type = "Treadmill"; break;
+    case ACTIVITY_FREESTYLE:    type = "Freestyle"; break;
+    case ACTIVITY_GYM:          type = "Gym"; break;
+    case ACTIVITY_INDOOR:       type = "Indoor"; break;
+    case ACTIVITY_HIKING:       type = "Hiking"; break;
+    case ACTIVITY_TRAILRUNNING: type = "Trailrunning"; break;
+    case ACTIVITY_SKIING:       type = "Skiing"; break;
+    case ACTIVITY_SNOWBOARDING: type = "Snowboarding"; break;
     }
     sprintf(filename, "%s_%02d-%02d-%02d.%s", type, time->tm_hour, time->tm_min, time->tm_sec, ext);
 
@@ -1003,40 +1079,6 @@ void download_elevation_data(TTBIN_FILE *ttbin)
 
 /*****************************************************************************/
 
-uint32_t export_formats(TTBIN_FILE *ttbin, uint32_t formats)
-{
-    unsigned i;
-    FILE *f;
-
-    for (i = 0; i < OFFLINE_FORMAT_COUNT; ++i)
-    {
-        if ((formats & OFFLINE_FORMATS[i].mask) && OFFLINE_FORMATS[i].producer)
-        {
-            if ((OFFLINE_FORMATS[i].gps_ok && ttbin->gps_records.count)
-                || (OFFLINE_FORMATS[i].treadmill_ok && (ttbin->activity == ACTIVITY_TREADMILL))
-                || (OFFLINE_FORMATS[i].pool_swim_ok && (ttbin->activity == ACTIVITY_SWIMMING)))
-            {
-                f = fopen(create_filename(ttbin, OFFLINE_FORMATS[i].name), "w");
-                if (f)
-                {
-                    (*OFFLINE_FORMATS[i].producer)(ttbin, f);
-                    fclose(f);
-                }
-                else
-                    formats &= ~OFFLINE_FORMATS[i].mask;
-            }
-            else
-                formats &= ~OFFLINE_FORMATS[i].mask;
-        }
-        else
-            formats &= ~OFFLINE_FORMATS[i].mask;
-    }
-
-    return formats;
-}
-
-/*****************************************************************************/
-
 void free_ttbin(TTBIN_FILE *ttbin)
 {
     TTBIN_RECORD *record;
@@ -1128,6 +1170,10 @@ static void update_summary_information(TTBIN_FILE *ttbin)
     case ACTIVITY_RUNNING:
     case ACTIVITY_CYCLING:
     case ACTIVITY_FREESTYLE:
+    case ACTIVITY_HIKING:
+    case ACTIVITY_TRAILRUNNING:
+    case ACTIVITY_SKIING:
+    case ACTIVITY_SNOWBOARDING:
         i = ttbin->gps_records.count;
         while (i > 0)
         {
@@ -1300,30 +1346,3 @@ int truncate_intervals(TTBIN_FILE *ttbin)
 
     return 1;
 }
-
-/*****************************************************************************/
-uint32_t parse_format_list(const char *formats)
-{
-    uint32_t fmts = 0;
-    int i;
-    char *str, *ptr;
-
-    str = strdup(formats);
-    ptr = strtok(str, " ,");
-    while (ptr)
-    {
-        for (i = 0; i < OFFLINE_FORMAT_COUNT; ++i)
-        {
-            if (!strcasecmp(ptr, OFFLINE_FORMATS[i].name))
-            {
-                fmts |= OFFLINE_FORMATS[i].mask;
-                break;
-            }
-        }
-        /* ignore any unknown formats... */
-        ptr = strtok(NULL, " ,");
-    }
-    free(str);
-    return fmts;
-}
-

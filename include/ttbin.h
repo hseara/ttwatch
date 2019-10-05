@@ -32,15 +32,21 @@
 #define TAG_HEART_RATE_RECOVERY (0x3f)
 #define TAG_INDOOR_CYCLING      (0x40)
 #define TAG_GYM                 (0x41)
+#define TAG_FITNESS_POINT       (0x4a)
+#define TAG_UNKNOWN_4B_VAR_LEN  (0x4b)
 
-#define ACTIVITY_RUNNING    (0)
-#define ACTIVITY_CYCLING    (1)
-#define ACTIVITY_SWIMMING   (2)
-#define ACTIVITY_STOPWATCH  (6) /* doesn't actually log any data */
-#define ACTIVITY_TREADMILL  (7)
-#define ACTIVITY_FREESTYLE  (8)
-#define ACTIVITY_GYM        (9)
-#define ACTIVITY_INDOOR     (11)
+#define ACTIVITY_RUNNING    	(0)
+#define ACTIVITY_CYCLING    	(1)
+#define ACTIVITY_SWIMMING   	(2)
+#define ACTIVITY_STOPWATCH  	(6) /* doesn't actually log any data */
+#define ACTIVITY_TREADMILL  	(7)
+#define ACTIVITY_FREESTYLE  	(8)
+#define ACTIVITY_GYM        	(9)
+#define ACTIVITY_HIKING     	(10)
+#define ACTIVITY_INDOOR     	(11)
+#define ACTIVITY_TRAILRUNNING 	(14)
+#define ACTIVITY_SKIING         (15)
+#define ACTIVITY_SNOWBOARDING   (16) 
 
 typedef struct
 {
@@ -94,6 +100,13 @@ typedef struct
     uint16_t total_calories;
     uint32_t total_cycles;
 } GYM_RECORD;
+
+typedef struct
+{
+    time_t   timestamp;
+    uint16_t points1;
+    uint16_t points2;
+} FITNESS_POINT_RECORD;
 
 typedef struct
 {
@@ -248,6 +261,7 @@ typedef struct _TTBIN_RECORD
         TREADMILL_RECORD           treadmill;
         SWIM_RECORD                swim;
         GYM_RECORD                 gym;
+        FITNESS_POINT_RECORD       fitness_point;
         LAP_RECORD                 lap;
         HEART_RATE_RECORD          heart_rate;
         RACE_SETUP_RECORD          race_setup;
@@ -275,7 +289,7 @@ typedef struct
 typedef struct
 {
     uint8_t  file_version;
-    uint8_t  firmware_version[3];
+    uint8_t  firmware_version[6];
     uint16_t product_id;
     time_t   timestamp_local;
     time_t   timestamp_utc;
@@ -299,6 +313,7 @@ typedef struct
     RECORD_ARRAY treadmill_records;
     RECORD_ARRAY swim_records;
     RECORD_ARRAY gym_records;
+    RECORD_ARRAY fitness_point_records;
     RECORD_ARRAY lap_records;
     RECORD_ARRAY heart_rate_records;
     RECORD_ARRAY goal_progress_records;
@@ -315,7 +330,7 @@ typedef struct
 
 TTBIN_FILE *read_ttbin_file(FILE *file);
 
-TTBIN_FILE *parse_ttbin_data(uint8_t *data, uint32_t size);
+TTBIN_FILE *parse_ttbin_data(const uint8_t *data, uint32_t size);
 
 int write_ttbin_file(const TTBIN_FILE *ttbin, FILE *file);
 
@@ -328,14 +343,6 @@ void delete_record(TTBIN_FILE *ttbin, TTBIN_RECORD *record);
 const char *create_filename(TTBIN_FILE *file, const char *ext);
 
 void download_elevation_data(TTBIN_FILE *ttbin);
-
-void export_csv(TTBIN_FILE *ttbin, FILE *file);
-
-void export_gpx(TTBIN_FILE *ttbin, FILE *file);
-
-void export_kml(TTBIN_FILE *ttbin, FILE *file);
-
-void export_tcx(TTBIN_FILE *ttbin, FILE *file);
 
 uint32_t export_formats(TTBIN_FILE *ttbin, uint32_t formats);
 
@@ -352,29 +359,6 @@ int truncate_goal(TTBIN_FILE *ttbin);
 int truncate_intervals(TTBIN_FILE *ttbin);
 
 /*****************************************************************************/
-
-#define OFFLINE_FORMAT_CSV  (0x00000001)
-#define OFFLINE_FORMAT_FIT  (0x00000002)
-#define OFFLINE_FORMAT_GPX  (0x00000004)
-#define OFFLINE_FORMAT_KML  (0x00000008)
-#define OFFLINE_FORMAT_PWX  (0x00000010)
-#define OFFLINE_FORMAT_TCX  (0x00000020)
-
-typedef struct
-{
-    uint32_t mask;
-    const char *name;
-    int gps_ok;
-    int treadmill_ok;
-    int pool_swim_ok;
-    int indoor_ok;
-    void (*producer)(TTBIN_FILE* ttbin, FILE *file);
-} OFFLINE_FORMAT;
-
-#define OFFLINE_FORMAT_COUNT    (6)
-extern const OFFLINE_FORMAT OFFLINE_FORMATS[OFFLINE_FORMAT_COUNT];
-
-uint32_t parse_format_list(const char *formats);
 
 #endif  /* __TTBIN_H__ */
 

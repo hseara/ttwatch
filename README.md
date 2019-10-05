@@ -36,6 +36,10 @@ before attempting to build it.
    Available from http://curl.haxx.se/download.html
 4. `libusb` 1.0.16 or later (tested against version 1.0.19).
    Available from http://sourceforge.net/projects/libusb/
+5. `protobuf` 3.6.0 or later (tested against version 3.6.0)
+   Available from https://github.com/protocolbuffers/protobuf
+6. `protobuf-c` 1.3.0 or later (tested against version 1.3.1)
+   Available from https://github.com/protobuf-c/protobuf-c
 
 Prebuilt packages should be available for most systems using the system's
 built in package manager (dpkg, yum, apt, rpm etc...). Make sure that the
@@ -187,6 +191,12 @@ to the USB devices is called `usb` as above, then the parameter will need to
 be `--runas fred:usb`, otherwise there will be permissions errors trying to
 communicate with the watch. Note that in this case `fred` will also need to
 be a member of the `usb` group, otherwise there will be permissions errors also.
+Note when starting the daemon with the `--runas` parameter the home directory used
+as the default activity store location `~/ttwatch` is still the home of the root
+user who is starting the daemon and not the home of the user running the daemon.
+In this case the activity store location must be specified on the command line
+or in the configuration file `/etc/ttwatch.conf` pointing to a location where the
+unprivileged user has write access.
 
 Note: The daemon is not supported under FreeBSD as the FreeBSD version of
       libusb does not support hot-plug detection and causes compilation
@@ -288,6 +298,9 @@ Applicable options (*not* case sensitive) and their values are as follows:
             by the help command (`-h` or `--help` command line options). This
             list can be either space- or comma-separated, or a combination
             of the two. This is a string value.
+7. Ephemeris7Days: specifies that a 7-day GPS ephemeris should be uploaded
+                   to the watch, rather than the default 3-day ephemeris.
+                   This is a boolean value.
 
 The following options only take effect when running the `ttwatchd` daemon:
 
@@ -303,10 +316,40 @@ The following options only take effect when running the `ttwatchd` daemon:
 Boolean values can have a value of ('y', 'yes', 'true', 'n', 'no' or 'false').
 These values are *not* case-sensitive.
 
-Recovery
-========
+An example global config file to set the activity store location, default daemon
+user and group, and normal activities when a watch is connected could be:
+```
+ActivityStore = /mnt/data/watch
+RunAsUser = jsmith:usb
+GetActivities = true
+UpdateFirmware = true
+UpdateGPS = true
+SetTime = true
+```
+A per-user config file could be added to specify a list of file formats to make:
+```
+Formats = csv,gpx,tcx
+```
+
+Recovery / Older Firmware
+=========================
 
 It *may* be possible to reset a watch with damaged firmware or file structure
 using the Recovery Mode, which requires TomTom's official MySports Connect
 software (Windows or Mac only): [information from TomTom support]
 (http://us.support.tomtom.com/app/answers/detail/a_id/17394).
+
+Watches with extremely old firmware (prior to 1.8.x) may not work with the
+`ttwatch` software. In this case, the solution is to use the official MySports
+Connect software to perform a firmware update. After this, the `ttwatch`
+software will work.
+
+Third-party Applications
+====
+
+Note that I have not tested these, and do not endorse or provide support for
+them, nor guarantee their functionality or safety. This list is for
+information only.
+
+[TT Watch Synchronizer - UI for ttwatch to manage your watch and tracks and optionaly upload to strava](https://github.com/Dica-Developer/ttws)
+

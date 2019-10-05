@@ -48,8 +48,16 @@ void daemon_watch_operations(TTWATCH *watch, OPTIONS *options)
         do_get_activities(watch, new_options, formats);
     }
 
+    if (new_options->get_summaries)
+    {
+        uint32_t formats = get_configured_formats(watch);
+        if (!new_options->set_formats)
+            formats |= new_options->formats;
+        do_get_activity_summaries(watch, new_options, formats);
+    }
+
     if (new_options->update_gps)
-        do_update_gps(watch);
+        do_update_gps(watch, options->eph_7_days);
 
     if (new_options->update_firmware)
         do_update_firmware(watch, 0);
@@ -64,21 +72,8 @@ void daemon_watch_operations(TTWATCH *watch, OPTIONS *options)
 int hotplug_attach_callback(struct libusb_context *ctx, struct libusb_device *dev,
     libusb_hotplug_event event, void *user_data)
 {
-    OPTIONS *options = (OPTIONS*)user_data;
-    TTWATCH *watch = 0;
-
-    write_log(0, "Watch connected...\n");
-
-    if (ttwatch_open_device(dev, options->select_device ? options->device : 0, &watch) == TTWATCH_NoError)
-    {
-        daemon_watch_operations(watch, options);
-
-        write_log(0, "Finished watch operations\n");
-
-        ttwatch_close(watch);
-    }
-    else
-        write_log(0, "Watch not processed - does not match user selection\n");
+    struct libusb_device **device = (struct libusb_device**)user_data;
+    *device = dev;
     return 0;
 }
 
@@ -178,11 +173,11 @@ void daemonise(const char *user)
 }
 
 /*****************************************************************************/
-int register_callback(uint32_t product_id, OPTIONS *options)
+int register_callback(uint32_t product_id, struct libusb_device  **device)
 {
     int result = libusb_hotplug_register_callback(NULL, LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED,
         LIBUSB_HOTPLUG_ENUMERATE, TOMTOM_VENDOR_ID, product_id,
-        LIBUSB_HOTPLUG_MATCH_ANY, hotplug_attach_callback, options, NULL);
+        LIBUSB_HOTPLUG_MATCH_ANY, hotplug_attach_callback, device, NULL);
     if (result)
         write_log(1, "Unable to register hotplug callback: %d\n", result);
     return result;
@@ -199,9 +194,12 @@ void help(char *argv[])
     write_log(0, "  -h, --help                 Print this help\n");
     write_log(0, "  -s, --activity-store=PATH Specify an alternate place for storing\n");
     write_log(0, "                               downloaded ttbin activity files\n");
-    write_log(0, "  -a, --auto                 Same as \"--update-fw --update-gps --get-activities --set-time\"\n");
+    write_log(0, "  -a, --auto                 Same as \"--update-fw --update-gps --get-activities --get-summaries --set-time\"\n");
     write_log(0, "  -d, --device=STRING        Specify which device to use (see below)\n");
+    write_log(0, "  -7, --eph7days             Uses a 7-day GPS ephemeris, instead of the default 3.\n");
     write_log(0, "      --get-activities       Downloads and deletes any activity records\n");
+    write_log(0, "                               currently stored on the watch\n");
+    write_log(0, "      --get-summaries        Downloads any daily activity summary records\n");
     write_log(0, "                               currently stored on the watch\n");
     write_log(0, "      --packets              Displays the packets being sent/received\n");
     write_log(0, "                               to/from the watch. Only used for debugging\n");
@@ -237,6 +235,8 @@ int main(int argc, char *argv[])
     int result;
 
     TTWATCH *watch = 0;
+    struct libusb_device *device = 0;
+
 
     OPTIONS *options = alloc_options();
 
@@ -248,12 +248,14 @@ int main(int argc, char *argv[])
         { "update-gps",     no_argument,       &options->update_gps,      1 },
         { "set-time",       no_argument,       &options->set_time,        1 },
         { "get-activities", no_argument,       &options->get_activities,  1 },
+        { "get-summaries",  no_argument,       &options->get_summaries,   1 },
         { "packets",        no_argument,       &options->show_packets,    1 },
         { "runas",          required_argument, 0, 3   },
         { "auto",           no_argument,       0, 'a' },
         { "help",           no_argument,       0, 'h' },
         { "device",         required_argument, 0, 'd' },
         { "activity-store", required_argument, 0, 's' },
+        { "eph7days",       no_argument,       0, '7' },
         {0}
     };
 
@@ -272,6 +274,7 @@ int main(int argc, char *argv[])
             options->update_firmware = 1;
             options->update_gps      = 1;
             options->get_activities  = 1;
+            options->get_summaries   = 1;
             options->set_time        = 1;
             break;
         case 'd':   /* select device */
@@ -290,6 +293,9 @@ int main(int argc, char *argv[])
                     free(options->activity_store);
                 options->activity_store = strdup(optarg);
             }
+            break;
+        case '7': /* 7-day ephemeris */
+            options->eph_7_days = 1;
             break;
         case 'h': /* help */
             help(argv);
@@ -324,12 +330,13 @@ int main(int argc, char *argv[])
     load_conf_file("/etc/ttwatch", options, LoadDaemonOperations);
 
     /* we have to include some useful functions, otherwise there's no point... */
-    if (!options->update_firmware && !options->update_gps && !options->get_activities && !options->set_time)
+    if (!options->update_firmware && !options->update_gps && !options->get_activities && !options->get_summaries && !options->set_time)
     {
         write_log(1, "You must include one or more of:\n");
         write_log(1, "    --update-fw\n");
         write_log(1, "    --update-gps\n");
         write_log(1, "    --get-activities\n");
+        write_log(1, "    --get-summaries\n");
         write_log(1, "    --set-time\n");
         write_log(1, "    --auto (OR -a)\n");
         free_options(options);
@@ -354,9 +361,9 @@ int main(int argc, char *argv[])
         _exit(1);
     }
 
-    if (register_callback(TOMTOM_MULTISPORT_PRODUCT_ID, options) ||
-        register_callback(TOMTOM_SPARK_CARDIO_PRODUCT_ID, options) ||
-        register_callback(TOMTOM_SPARK_MUSIC_PRODUCT_ID, options))
+    if (register_callback(TOMTOM_MULTISPORT_PRODUCT_ID, &device) ||
+        register_callback(TOMTOM_SPARK_CARDIO_PRODUCT_ID, &device) ||
+        register_callback(TOMTOM_SPARK_MUSIC_PRODUCT_ID, &device))
     {
         libusb_exit(NULL);
         free_options(options);
@@ -366,7 +373,26 @@ int main(int argc, char *argv[])
     /* infinite loop - handle events every 10 seconds */
     while (1)
     {
+        device = 0;
         libusb_handle_events_completed(NULL, NULL);
+        if (device)
+        {
+            TTWATCH *watch = 0;
+
+            write_log(0, "Watch connected...\n");
+
+            int ret = ttwatch_open_device(device, options->select_device ? options->device : 0, &watch);
+            if (ret == TTWATCH_NoError)
+            {
+                daemon_watch_operations(watch, options);
+
+                write_log(0, "Finished watch operations\n");
+
+                ttwatch_close(watch);
+            }
+            else
+                write_log(0, "Watch not processed - does not match user selection (%d)\n", ret);
+        }
         usleep(10000);
     }
 

@@ -3,9 +3,11 @@
 ** Implementation of basic config file loading                                **
 \******************************************************************************/
 
+#include "export.h"
 #include "options.h"
 #include "log.h"
 #include "ttbin.h"
+#include "protobuf.h"
 
 #include <ctype.h>
 #include <memory.h>
@@ -180,6 +182,8 @@ void load_conf_file(const char *filename, OPTIONS *options, ConfLoadType load_ty
         }
         else if (!strcasecmp(option, "SkipElevation"))
             result = get_bool(value, &options->skip_elevation);
+        else if (!strcasecmp(option, "Ephemeris7days"))
+            result = get_bool(value, &options->eph_7_days);
 
         if (!result)
             write_log(0, "Invalid conf file line: %s\n", str);
@@ -207,6 +211,7 @@ OPTIONS *alloc_options()
 OPTIONS *copy_options(const OPTIONS *o)
 {
     OPTIONS *op = alloc_options();
+    memcpy(op, o, sizeof(OPTIONS));
 
 #define COPY_STRING(n) if (o->n) op->n = strdup(o->n)
 

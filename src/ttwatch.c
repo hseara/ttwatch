@@ -4,6 +4,8 @@
 \******************************************************************************/
 
 #include "ttbin.h"
+#include "protobuf.h"
+#include "export.h"
 #include "json.h"
 #include "log.h"
 #include "options.h"
@@ -84,6 +86,7 @@ struct MANIFEST_ENUM_DEFINITION
 #include "manifest_definitions_0001082e.h"
 #include "manifest_definitions_00010113.h"
 #include "manifest_definitions_0001031b.h"
+#include "manifest_definitions_0001073e.h"
 
 struct
 {
@@ -103,6 +106,8 @@ struct
     { 0x000103cb, MANIFEST_DEFINITION_0001031b_COUNT, MANIFEST_DEFINITIONS_0001031b },
     { 0x000103fa, MANIFEST_DEFINITION_0001031b_COUNT, MANIFEST_DEFINITIONS_0001031b },
     { 0x000103fe, MANIFEST_DEFINITION_0001031b_COUNT, MANIFEST_DEFINITIONS_0001031b },
+    { 0x0001073e, MANIFEST_DEFINITION_0001073e_COUNT, MANIFEST_DEFINITIONS_0001073e },
+    { 0x00010740, MANIFEST_DEFINITION_0001073e_COUNT, MANIFEST_DEFINITIONS_0001073e },
 };
 
 #define MANIFEST_DEFINITION_COUNT (sizeof(MANIFEST_DEFINITIONS) / sizeof(MANIFEST_DEFINITIONS[0]))
@@ -267,12 +272,6 @@ static void do_set_formats_callback(const char *id, int auto_open, void *data)
 void do_set_formats(TTWATCH *watch, uint32_t formats)
 {
     unsigned i;
-    /* make sure we've got some formats... */
-    if (!formats)
-    {
-        write_log(1, "No valid file formats found\n");
-        return;
-    }
 
     if (ttwatch_enumerate_offline_formats(watch, do_set_formats_callback, watch) != TTWATCH_NoError)
     {
@@ -713,6 +712,11 @@ static void do_list_history_callback(TTWATCH_ACTIVITY activity, int index, const
         case TTWATCH_Treadmill: write_log(0, "Treadmill:\n"); break;
         case TTWATCH_Freestyle: write_log(0, "Freestyle:\n"); break;
         case TTWATCH_Gym:       write_log(0, "Gym:\n"); break;
+        case TTWATCH_Hiking:    write_log(0, "Hiking:\n"); break;        
+        case TTWATCH_IndoorCycling:  write_log(0, "IndoorCycling:\n"); break;        
+        case TTWATCH_TrailRunning:   write_log(0, "Trailrunning:\n"); break;        
+        case TTWATCH_Skiing:         write_log(0, "Skiing:\n"); break;        
+        case TTWATCH_Snowboarding:   write_log(0, "Snowboarding:\n"); break;
         }
         d->activity = activity;
     }
@@ -802,7 +806,8 @@ void do_display_settings(TTWATCH *watch)
     if (!definitions)
     {
         write_log(1, "Firmware version not supported\n");
-        return;
+        definitions = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].definitions;
+        defn_count  = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].count;
     }
 
     for (i = 0; i < defn_count; ++i)
@@ -849,7 +854,7 @@ void do_display_settings(TTWATCH *watch)
 }
 
 /*****************************************************************************/
-void do_set_setting(TTWATCH *watch, const char *setting, const char *value)
+void do_set_setting(TTWATCH *watch, const char *setting, const char *value, int force)
 {
     uint32_t i;
     int j;
@@ -874,7 +879,10 @@ void do_set_setting(TTWATCH *watch, const char *setting, const char *value)
     if (!definitions)
     {
         write_log(1, "Firmware version not supported\n");
-        return;
+        if (!force)
+            return;
+        definitions = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].definitions;
+        defn_count  = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].count;
     }
 
     /* check to see if the setting exists */
@@ -974,7 +982,8 @@ void do_get_setting(TTWATCH *watch, const char *setting)
     if (!definitions)
     {
         write_log(1, "Firmware version not supported\n");
-        return;
+        definitions = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].definitions;
+        defn_count  = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].count;
     }
 
     /* check to see if the setting exists */
@@ -1049,7 +1058,8 @@ void do_list_settings(TTWATCH *watch)
     if (!definitions)
     {
         write_log(1, "Firmware version not supported\n");
-        return;
+        definitions = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].definitions;
+        defn_count  = MANIFEST_DEFINITIONS[MANIFEST_DEFINITION_COUNT - 1].count;
     }
 
     for (i = 0; i < defn_count; ++i)
@@ -1239,7 +1249,7 @@ void help(char *argv[])
     write_log(0, "  -h, --help                 Print this help\n");
     write_log(0, "  -s, --activity-store=PATH Specify an alternate place for storing\n");
     write_log(0, "                               downloaded ttbin activity files\n");
-    write_log(0, "  -a, --auto                 Same as \"--update-fw --update-gps --get-activities --set-time\"\n");
+    write_log(0, "  -a, --auto                 Same as \"--update-fw --update-gps --get-activities --get-summaries --set-time\"\n");
     write_log(0, "      --all-settings         List all the current settings on the watch\n");
     write_log(0, "      --clear-data           Delete all activities and history data from the\n");
     write_log(0, "                               watch. Does NOT save the data before deleting it\n");
@@ -1251,14 +1261,19 @@ void help(char *argv[])
     write_log(0, "      --delete-history=[ENTRY] Deletes a single history entry from the watch\n");
     write_log(0, "  -d, --device=STRING        Specify which device to use (see below)\n");
     write_log(0, "      --devices              List detected USB devices that can be selected.\n");
+    write_log(0, "  -7, --eph7days             Uses a 7-day GPS ephemeris, instead of the default 3.\n");
     write_log(0, "      --factory-reset        Performs a factory reset on the watch. This option\n");
     write_log(0, "                               must be specified twice for safety.\n");
+    write_log(0, "      --force                Forces the --setting command to write a setting to the\n");
+    write_log(0, "                               watch, even if the firmware version doesn't match\n");
     write_log(0, "      --get-activities       Downloads and deletes any activity records\n");
     write_log(0, "                               currently stored on the watch\n");
     write_log(0, "      --get-formats          Displays the list of file formats that are\n");
     write_log(0, "                               saved when the watch is automatically processed\n");
     write_log(0, "      --get-name             Displays the current watch name\n");
     write_log(0, "      --get-time             Returns the current GPS time on the watch\n");
+    write_log(0, "      --get-summaries        Downloads any daily activity summary records\n");
+    write_log(0, "                               currently stored on the watch\n");
     write_log(0, "      --initial-setup        Performs an initial setup for the watch, adding a\n");
     write_log(0, "                               default preferences file and default race files\n");
 #ifdef UNSAFE
@@ -1413,6 +1428,7 @@ int main(int argc, char *argv[])
         { "get-time",       no_argument,       &options->get_time,        1 },
         { "set-time",       no_argument,       &options->set_time,        1 },
         { "get-activities", no_argument,       &options->get_activities,  1 },
+        { "get-summaries",  no_argument,       &options->get_summaries,   1 },
         { "packets",        no_argument,       &options->show_packets,    1 },
         { "devices",        no_argument,       &options->list_devices,    1 },
         { "get-formats",    no_argument,       &options->list_formats,    1 },
@@ -1423,7 +1439,9 @@ int main(int argc, char *argv[])
         { "all-settings",   no_argument,       &options->display_settings,1 },
         { "settings",       no_argument,       &options->list_settings,   1 },
         { "initial-setup",  no_argument,       &options->initial_setup,   1 },
+        { "force",          no_argument,       &options->force,           1 },
         { "auto",           no_argument,       0, 'a' },
+        { "eph7days",       no_argument,       0, '7' },
         { "help",           no_argument,       0, 'h' },
         { "version",        no_argument,       0, 'v' },
         { "device",         required_argument, 0, 'd' },
@@ -1449,7 +1467,7 @@ int main(int argc, char *argv[])
 #ifdef UNSAFE
         "lr:w:"
 #endif
-        "ahd:s:v", long_options, &option_index)) != -1)
+        "ahd:s:v7", long_options, &option_index)) != -1)
     {
         switch (opt)
         {
@@ -1495,6 +1513,7 @@ int main(int argc, char *argv[])
             options->update_firmware = 1;
             options->update_gps      = 1;
             options->get_activities  = 1;
+            options->get_summaries   = 1;
             options->set_time        = 1;
             break;
 #ifdef UNSAFE
@@ -1536,6 +1555,9 @@ int main(int argc, char *argv[])
                     free(options->activity_store);
                 options->activity_store = strdup(optarg);
             }
+            break;
+        case '7': /* 7-day ephemeris */
+            options->eph_7_days = 1;
             break;
         case 'h': /* help */
             help(argv);
@@ -1592,7 +1614,8 @@ int main(int argc, char *argv[])
         !options->read_file && !options->write_file && !options->delete_file && !options->list_files &&
 #endif
         !options->update_firmware && !options->update_gps && !options->show_versions &&
-        !options->get_activities && !options->get_time && !options->set_time &&
+        !options->get_activities && !options->get_summaries &&
+        !options->get_time && !options->set_time &&
         !options->list_devices && !options->get_name && !options->set_name &&
         !options->list_formats && !options->set_formats && !options->list_races &&
         !options->list_history && !options->delete_history && !options->update_race &&
@@ -1714,8 +1737,21 @@ int main(int argc, char *argv[])
         do_get_activities(watch, options, get_configured_formats(watch));
     }
 
+    if (options->get_summaries)
+    {
+        char name[32];
+        if (!ttwatch_get_watch_name(watch, name, sizeof(name)) == TTWATCH_NoError)
+        {
+            char *filename = malloc(strlen(options->activity_store) + 1 + strlen(name) + 1 + 12 + 1);
+            sprintf(filename, "%s/%s/ttwatch.conf", options->activity_store, name);
+            load_conf_file(filename, options, LoadDaemonOperations);
+            free(filename);
+        }
+        do_get_activity_summaries(watch, options, get_configured_formats(watch));
+    }
+
     if (options->update_gps)
-        do_update_gps(watch);
+        do_update_gps(watch, options->eph_7_days);
 
     if (options->update_firmware)
     {
@@ -1772,7 +1808,7 @@ int main(int argc, char *argv[])
         if (str)
         {
             *str = 0;
-            do_set_setting(watch, options->setting_spec, ++str);
+            do_set_setting(watch, options->setting_spec, ++str, options->force);
         }
         else
             do_get_setting(watch, options->setting_spec);

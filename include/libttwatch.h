@@ -14,16 +14,18 @@
 extern "C" {
 #endif
 
-#define LIBTTWATCH_VERSION  (0x000105)  /* version 0.1.5 */
+#define LIBTTWATCH_VERSION  (0x000106)  /* version 0.1.6 */
 
 #define TOMTOM_VENDOR_ID                (0x1390)
 #define TOMTOM_MULTISPORT_PRODUCT_ID    (0x7474)
 #define TOMTOM_SPARK_MUSIC_PRODUCT_ID   (0x7475)
 #define TOMTOM_SPARK_CARDIO_PRODUCT_ID  (0x7477)
+#define TOMTOM_TOUCH_PRODUCT_ID         (0x7480)
 
 #define IS_SPARK(id)                            \
     (((id) == TOMTOM_SPARK_MUSIC_PRODUCT_ID) || \
-     ((id) == TOMTOM_SPARK_CARDIO_PRODUCT_ID))  \
+     ((id) == TOMTOM_SPARK_CARDIO_PRODUCT_ID) || \
+     ((id) == TOMTOM_TOUCH_PRODUCT_ID))  \
 
 
 /*****************************************************************************/
@@ -81,13 +83,18 @@ typedef enum
 
 /*****************************************************************************/
 typedef enum
-{
-    TTWATCH_Running,
-    TTWATCH_Cycling,
-    TTWATCH_Swimming,
-    TTWATCH_Treadmill = 7,
-    TTWATCH_Freestyle,
-    TTWATCH_Gym
+{    
+    TTWATCH_Running = 0,    
+    TTWATCH_Cycling = 1,    
+    TTWATCH_Swimming = 2,    
+    TTWATCH_Treadmill = 7,    
+    TTWATCH_Freestyle = 8,    
+    TTWATCH_Gym = 9,    
+    TTWATCH_Hiking = 10,           // Adventurer
+    TTWATCH_IndoorCycling = 11,    // Adventurer
+    TTWATCH_TrailRunning = 14,     // Adventurer
+    TTWATCH_Skiing = 15,           // Adventurer
+    TTWATCH_Snowboarding = 16      // Adventurer
 } TTWATCH_ACTIVITY;
 
 /*****************************************************************************/
@@ -224,6 +231,7 @@ typedef enum
 #define TTWATCH_FILE_HISTORY_DATA           (0x00730000)
 #define TTWATCH_FILE_HISTORY_SUMMARY        (0x00830000)
 #define TTWATCH_FILE_TTBIN_DATA             (0x00910000)
+#define TTWATCH_FILE_ACTIVITY_SUMMARY       (0x00b30000)
 
 /******************************************************************************
 * Callback function for ttwatch_enumerate_devices. The watch is open before   *
